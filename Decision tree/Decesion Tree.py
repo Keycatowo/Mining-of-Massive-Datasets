@@ -18,16 +18,47 @@
 
 # ## Set up
 
-# In[1]:
+# ### colab-environment
+
+# In[ ]:
 
 
-# import findspark
-# findspark.init()
+get_ipython().system('apt-get install openjdk-8-jdk-headless -qq > /dev/null')
+get_ipython().system('wget -q http://www-eu.apache.org/dist/spark/spark-2.4.4/spark-2.4.4-bin-hadoop2.7.tgz')
+get_ipython().system('tar xf spark-2.4.4-bin-hadoop2.7.tgz')
+get_ipython().system('pip install -q findspark')
 
-# import glob # to get file paths
-# import random
+import os
+os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-8-openjdk-amd64"
+os.environ["SPARK_HOME"] = "/content/spark-2.4.4-bin-hadoop2.7"
+
+import findspark
+findspark.init()
+
+
+# In[9]:
+
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+
+# ### local-environment
+
+# In[ ]:
+
+
+import os
+os.environ['JAVA_HOME'] = 'C:\Program Files\Java\jdk1.8.0_201'
+
+
+# ### import and set sc
+
+# In[ ]:
+
+
 import numpy as np # for preprocess
-# import itertools # to generate pairs from list
+import math 
 
 import pyspark
 from pyspark import SparkConf, SparkContext
@@ -36,38 +67,31 @@ from pyspark import SparkConf, SparkContext
 # In[4]:
 
 
-import os
-os.environ['JAVA_HOME'] = 'C:\Program Files\Java\jdk1.8.0_201'
-
-
-# In[280]:
-
-
 conf = SparkConf().set('spark.driver.host','127.0.0.1').setMaster("local").setAppName("DececisionTree").set("spark.default.parallelism", 4)
 sc = SparkContext(conf=conf)
 sc
 
 
-# In[415]:
+# In[ ]:
 
 
 # Parameter
 category_Numbers = 14 # 一共14個categories類別
 spilt_rate = [9,1] # 用8：2的比例分割資料成 訓練/測試 資料集 
-Min_leaf_size = 200
-N = 3
+Min_leaf_size = 250
+N = 10
 
 
 # ## Input
 
-# In[282]:
+# In[16]:
 
 
 Input = sc.textFile("./data/train.tsv")
 Input.count()
 
 
-# In[283]:
+# In[17]:
 
 
 Input.first()
@@ -79,14 +103,14 @@ Input.first()
 
 # #### 清洗標題
 
-# In[284]:
+# In[ ]:
 
 
 title = Input.first()
 Data = Input.filter(lambda x : x!= title)
 
 
-# In[285]:
+# In[19]:
 
 
 Data.first()
@@ -95,7 +119,7 @@ Data.first()
 # #### 分割資料
 # + 原始資料是以`\t`分割,並由`"`包覆
 
-# In[286]:
+# In[20]:
 
 
 lines = Data.map(lambda x : x.replace("\"","")).map(lambda x : x.split("\t"))
@@ -106,13 +130,13 @@ lines.first()[3:]
 
 # #### 建立one-hot encode table
 
-# In[287]:
+# In[ ]:
 
 
 category_with_index = lines.map(lambda x: x[3]).distinct().zipWithIndex()
 
 
-# In[288]:
+# In[22]:
 
 
 category_Numbers_list = list(range(category_Numbers))
@@ -120,7 +144,7 @@ category_Numbers_array = np.array(category_Numbers_list).reshape(category_Number
 category_Numbers_array
 
 
-# In[289]:
+# In[23]:
 
 
 from sklearn.preprocessing import OneHotEncoder
@@ -129,14 +153,14 @@ enc.fit(category_Numbers_array)
 encoder_table = enc.transform(category_Numbers_array).toarray()
 
 
-# In[290]:
+# In[24]:
 
 
 category_Map = category_with_index.map(lambda x : (x[0],encoder_table[x[1]])).collectAsMap()
 category_Map
 
 
-# In[291]:
+# In[ ]:
 
 
 from pyspark.mllib.regression import LabeledPoint
@@ -151,7 +175,7 @@ def extract_features(row):
     return (label,features)
 
 
-# In[292]:
+# In[26]:
 
 
 labelRDD = lines.map(extract_features).map(lambda x: LabeledPoint(x[0],x[1]))
@@ -160,7 +184,7 @@ labelRDD.first()
 
 # ### 切分資料
 
-# In[303]:
+# In[27]:
 
 
 (trainRDD,testRDD) = labelRDD.randomSplit(spilt_rate)
@@ -170,17 +194,18 @@ print("test:  " + str(testRDD.count()))
 
 # ### 持久化
 
-# In[304]:
+# In[28]:
 
 
 trainRDD.persist()
+testRDD.persist()
 
 
 # ## Train Model By mllib
 
 # + 用內建的model來做對比
 
-# In[305]:
+# In[ ]:
 
 
 from pyspark.mllib.tree import DecisionTree
@@ -189,7 +214,7 @@ model = DecisionTree.trainClassifier(
     impurity="entropy", maxDepth=5, maxBins=5)
 
 
-# In[481]:
+# In[30]:
 
 
 right_count = wrong_count = 0
@@ -197,15 +222,13 @@ for test_data in testRDD.take(testRDD.count()):
     ans = test_data.label
     gus = model.predict(test_data.features)
     if ans==gus:
-#         print("Y",end='\r')
         right_count += 1
     else :
-#         print("N",end='\r')
         wrong_count += 1
     print(str(right_count) + ":" + str(wrong_count), end = "\r")
 
 
-# In[482]:
+# In[31]:
 
 
 accuracy = right_count/(right_count+wrong_count)*100
@@ -221,7 +244,7 @@ print("正確率:%.1f" % accuracy)
 
 # #### 計算entropy
 
-# In[308]:
+# In[ ]:
 
 
 # 計算 2-state system 的entropy
@@ -235,7 +258,7 @@ def entropy(state1,state2):
         return -(p1*math.log2(p1)) -(p2*math.log2(p2))
 
 
-# In[309]:
+# In[ ]:
 
 
 def RDD_entropy(RDD,count="no_value"):
@@ -244,7 +267,7 @@ def RDD_entropy(RDD,count="no_value"):
     return entropy(state1,count-state1)
 
 
-# In[310]:
+# In[36]:
 
 
 entropy(1,100)
@@ -252,7 +275,7 @@ entropy(1,100)
 
 # #### 一個feature中尋找產生最大的information gain
 
-# In[315]:
+# In[ ]:
 
 
 def max_split_gain(RDD,sample_node = 0):
@@ -285,7 +308,7 @@ def max_split_gain(RDD,sample_node = 0):
 
 # #### 所有feature內找最大information gain
 
-# In[316]:
+# In[ ]:
 
 
 def max_feature_gain(RDD,sample_node=0):
@@ -303,7 +326,7 @@ def max_feature_gain(RDD,sample_node=0):
     return (max_gain[1],max_gain[0][1])
 
 
-# In[363]:
+# In[39]:
 
 
 example_RDD = trainRDD.randomSplit([0.05,0.95])[0] # 取1/10的資料來做示範
@@ -312,7 +335,7 @@ max_feature_gain(RDD=example_RDD,sample_node=2)
 
 # ### 建樹
 
-# In[477]:
+# In[ ]:
 
 
 class node:
@@ -397,63 +420,27 @@ class node:
                 return self.right.predict(features)
 
 
-# In[478]:
+# In[ ]:
 
 
-root = node(example_RDD)
+root = node(trainRDD)
 
 
-# In[479]:
+# In[42]:
 
 
 root.build()
 
 
-# In[424]:
-
-
-root.count
-
-
-# In[425]:
-
-
-root.left.count
-
-
-# In[426]:
-
-
-root.right.count
-
-
-# In[427]:
-
-
-root.right.left.count
-
-
-# In[428]:
-
-
-root.right.right.count
-
-
-# In[475]:
+# In[43]:
 
 
 root.level_order_print()
 
 
-# In[480]:
-
-
-root.predict(tmp.features)
-
-
 # ## Test Model
 
-# In[483]:
+# In[45]:
 
 
 right_count = wrong_count = 0
@@ -461,20 +448,32 @@ for test_data in testRDD.take(testRDD.count()):
     ans = test_data.label
     gus = root.predict(test_data.features)
     if ans==gus:
-#         print("Y",end='\r')
         right_count += 1
     else :
-#         print("N",end='\r')
         wrong_count += 1
     print(str(right_count) + ":" + str(wrong_count), end = "\r")
+print(str(right_count) + ":" + str(wrong_count))
 
 
-# In[484]:
+# In[46]:
 
 
 accuracy = right_count/(right_count+wrong_count)*100
 print("正確率:%.1f" % accuracy)
 
+
+# ## 結論
+
+# + 建立決策樹
+#     + 用二元樹遞迴建立
+#     + 選擇最大資訊增益之feature及split_point
+#     + 設定最小子葉大小
+# + 比較預測結果
+#     + 與使用Mllib的結果差不多(0.4%)
+# + 未來改良方向
+#     + 減枝優化
+#     + feature篩選優化
+#     + random forest
 
 # In[ ]:
 
